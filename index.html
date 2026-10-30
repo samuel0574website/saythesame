@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Say the Same</title>
+  <title>Say the Same 小慕製作</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -66,17 +66,14 @@
 
   <!-- 1. 登入與首頁區塊 -->
   <div id="view-home" class="view-section">
-    <p>小慕製作</p>
+    <p>測測你們有沒有默契</p>
     <input type="text" id="playerName" placeholder="暱稱">
     <div style="border-top: 1px solid var(--border); margin: 10px 0;"></div>
     
     <label style="font-size: 0.85rem; color: var(--text-muted); text-align: left;">建立新房間</label>
     <div class="flex-row">
-      <select id="maxPlayers" style="margin-bottom: 0;">
-        <option value="2">2 人遊玩</option>
-        <option value="3">3 人遊玩</option>
-      </select>
-      <button class="btn" onclick="createRoom()">建立房間</button>
+      <button class="btn" onclick="createRoom(2)">建立 2 人房間</button>
+      <button class="btn" onclick="createRoom(3)">建立 3 人房間</button>
     </div>
     
     <div style="margin: 10px 0; color: var(--text-muted);">或</div>
@@ -104,7 +101,7 @@
     </div>
 
     <p>請輸入你想到的詞彙，所有人送出後將揭曉！</p>
-    <input type="text" id="wordInput" placeholder="輸入詞彙...">
+    <input type="text" id="wordInput" placeholder="輸入詞彙或數字..." inputmode="text" autocomplete="off">
     <button id="btnSubmitWord" class="btn" onclick="submitWord()">送出詞彙</button>
     <p id="waitWordMsg" class="hidden" style="color: var(--primary); font-weight: bold; margin-top: 10px;">等待其他玩家送出...</p>
   </div>
@@ -125,7 +122,7 @@
   <!-- 5. 結束與歷史紀錄區 -->
   <div id="view-end" class="view-section hidden">
     <h2 style="color: var(--success);">🎉 達成共識！</h2>
-    <p>輪數： <span id="endRoundCount"></span></p>
+    <p>輪數：<span id="endRoundCount"></span></p>
     
     <div style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
       <table class="history-table" id="historyTable">
@@ -181,6 +178,8 @@
   let currentRoomId = null;
   let roomRef = null;
   let isHost = false; // 用於指派房主執行狀態切換（避免重複寫入資料庫）
+  let displayedPlayRound = null;
+  let notifiedReplaySignal = null;
 
   // 匿名登入
   signInAnonymously(auth).catch(error => console.error("Auth error:", error));
@@ -195,13 +194,13 @@
   }
 
   // 1. 建立房間
-  window.createRoom = async function() {
+  window.createRoom = async function(maxPlayers) {
     myName = document.getElementById('playerName').value.trim() || "匿名玩家";
     if (!myUid) return alert("系統連線中，請稍候...");
     
     // 產生隨機4位數房號
     currentRoomId = Math.floor(1000 + Math.random() * 9000).toString();
-    const maxP = parseInt(document.getElementById('maxPlayers').value);
+    const maxP = Number(maxPlayers);
     
     roomRef = ref(db, `rooms/${currentRoomId}`);
     await set(roomRef, {
@@ -256,6 +255,7 @@
   // 更新畫面
   function updateUI(room) {
     const pKeys = Object.keys(room.players || {});
+    if (room.status !== 'ended') notifiedReplaySignal = null;
     
     // 狀態：等待中
     if (room.status === 'waiting') {
@@ -284,13 +284,20 @@
         document.getElementById('prevRoundTip').classList.add('hidden');
       }
 
+      // 同一回合的即時資料更新（例如其他玩家送出）不可清空正在輸入的文字。
+      // 僅在進入一個新回合時清空輸入框。
+      const wordInput = document.getElementById('wordInput');
+      if (displayedPlayRound !== room.round) {
+        wordInput.value = '';
+        displayedPlayRound = room.round;
+      }
+
       // 重設按鈕與輸入框
       if (room.inputs && room.inputs[myUid]) {
         document.getElementById('btnSubmitWord').disabled = true;
         document.getElementById('waitWordMsg').classList.remove('hidden');
       } else {
         document.getElementById('btnSubmitWord').disabled = false;
-        document.getElementById('wordInput').value = '';
         document.getElementById('waitWordMsg').classList.add('hidden');
       }
     }
@@ -370,10 +377,23 @@
 
       if (room.playAgain && room.playAgain[myUid]) {
         document.getElementById('btnPlayAgain').disabled = true;
+        document.getElementById('waitAgainMsg').textContent = '等待其他人按確認...';
         document.getElementById('waitAgainMsg').classList.remove('hidden');
       } else {
         document.getElementById('btnPlayAgain').disabled = false;
-        document.getElementById('waitAgainMsg').classList.add('hidden');
+        const otherReadyUid = Object.keys(room.playAgain || {}).find(uid => uid !== myUid);
+        if (otherReadyUid) {
+          const otherName = room.players[otherReadyUid] || '另一位玩家';
+          const replaySignal = `${room.round}:${otherReadyUid}`;
+          document.getElementById('waitAgainMsg').textContent = `${otherName} 想再玩一次！`;
+          document.getElementById('waitAgainMsg').classList.remove('hidden');
+          if (notifiedReplaySignal !== replaySignal) {
+            notifiedReplaySignal = replaySignal;
+            alert(`${otherName} 想再玩一次！`);
+          }
+        } else {
+          document.getElementById('waitAgainMsg').classList.add('hidden');
+        }
       }
     }
   }
